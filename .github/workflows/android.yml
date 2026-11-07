@@ -2,11 +2,14 @@ name: Build Android APK
 
 on:
   push:
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -29,9 +32,27 @@ jobs:
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: Upload APK
+      - name: Upload APK (GitHub artifact)
         uses: actions/upload-artifact@v4
         with:
           name: CameraFinder-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Publish APK to apk branch (so it can be fetched over git)
+        if: success()
+        env:
+          TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          echo "Found APK: $APK"
+          WORK=$(mktemp -d)
+          cp "$APK" "$WORK/CameraFinder.apk"
+          cd "$WORK"
+          git init -q
+          git checkout -q -b apk
+          git add CameraFinder.apk
+          git -c user.email=ci@local -c user.name=CI commit -q -m "APK build ${GITHUB_SHA} [skip ci]"
+          git push -f "https://x-access-token:${TOKEN}@github.com/${REPO}.git" apk

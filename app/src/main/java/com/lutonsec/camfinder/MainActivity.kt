@@ -32,6 +32,7 @@ class MainActivity : AppCompatActivity() {
 
     private val devices = LinkedHashMap<String, Device>()
     private val ordered = ArrayList<Device>()
+    private val localIps = HashSet<String>()
     private lateinit var adapter: DeviceAdapter
     private val lock = Any()
 
@@ -89,6 +90,7 @@ class MainActivity : AppCompatActivity() {
         val nics = (0 until nicSpinner.count).mapNotNull { nicSpinner.getItemAtPosition(it) as? LocalNic }
         if (nics.isEmpty()) { populateNics(); return }
         val sel = selectedNic()
+        localIps.clear(); nics.forEach { it.ip.hostAddress?.let { ip -> localIps.add(ip) } }
         clearTempIps()
         synchronized(lock) { devices.clear(); ordered.clear() }
         runOnUiThread { adapter.notifyDataSetChanged(); progress.visibility = View.VISIBLE; findButton.isEnabled = false }
@@ -98,8 +100,10 @@ class MainActivity : AppCompatActivity() {
         Thread {
             try {
                 Discovery.scanAll(nics, 5, { upsert(it) }, { })
-                if (arpCheck.isChecked && sel != null) { setStatus("ARP sweep…"); deepSweep(sel) }
-                resolveMissingMacs(sel)
+                if (arpCheck.isChecked) { setStatus("ARP sweep across all subnets…"); for (nic in nics) deepSweep(nic) }
+                resolveMissingMacs()
+                setStatus("Identifying devices…")
+                fingerprintPass()
             } catch (_: Exception) {
             } finally {
                 scanning = false
@@ -112,6 +116,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun upsert(d: Device) {
         if (d.ip.isEmpty()) return
+        if (localIps.contains(d.ip)) return      // skip this device (the tester) itself
         synchronized(lock) {
             val existing = devices[d.key]
             if (existing != null) existing.mergeFrom(d)
@@ -143,16 +148,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** ONVIF hits carry no MAC; fill it from the ARP table so the vendor shows. */
-    private fun resolveMissingMacs(sel: LocalNic?) {
-        if (sel == null) return
+    private fun resolveMissingMacs() {
         val arp = HashMap<String, String>()
         for (line in Root.readArp().lines().drop(1)) {
             val c = line.trim().split(Regex("\\s+"))
             if (c.size >= 4 && c[3].count { it == ':' } == 5) arp[c[0]] = c[3].uppercase()
         }
         val todo = synchronized(lock) { ordered.filter { it.mac.isEmpty() } }
-        for (d in todo) { val mac = arp[d.ip]; if (mac != null) { d.mac = mac; d.fillVendorFromMac(); } }
+        for (d in todo) { val mac = arp[d.ip]; if (mac != null) { d.mac = mac; d.fillVendorFromMac() } }
         runOnUiThread { adapter.notifyDataSetChanged() }
+    }
+
+    /** Identify each device (camera / printer / switch / PC / NAS) by port + SNMP fingerprinting, in parallel. */
+    private fun fingerprintPass() {
+        val all = synchronized(lock) { ArrayList(ordered) }
+        val pool = Executors.newFixedThreadPool(16)
+        for (d in all) pool.submit {
+            try { val r = Fingerprint.probe(d.ip); Fingerprint.inferType(d, r) } catch (_: Exception) {}
+            runOnUiThread { adapter.notifyDataSetChanged() }
+        }
+        pool.shutdown()
+        try { pool.awaitTermination(60, TimeUnit.SECONDS) } catch (_: Exception) {}
     }
 
     private fun isReachable(d: Device): Boolean {
@@ -349,7 +365,8 @@ class MainActivity : AppCompatActivity() {
             val t1 = view.findViewById<TextView>(android.R.id.text1)
             val t2 = view.findViewById<TextView>(android.R.id.text2)
             val brand = if (d.brand.isNotEmpty()) d.brand else "?"
-            t1.text = "${d.ip}    $brand"
+            val typeStr = if (d.type.isNotEmpty() && d.type != "?") "  ·  ${d.type}" else ""
+            t1.text = "${d.ip}    $brand$typeStr"
             val bits = listOfNotNull(d.vendor.ifEmpty { null }, d.model.ifEmpty { null }, d.mac.ifEmpty { null }, d.source.ifEmpty { null })
             t2.text = bits.joinToString("  ·  ")
             val reachable = isReachable(d)

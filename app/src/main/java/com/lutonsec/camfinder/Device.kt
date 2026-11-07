@@ -15,6 +15,7 @@ class Device {
     var onvifXAddr = ""
     var activated = true // Hikvision: false = needs activation
     var source = ""      // ONVIF / SADP / Dahua / DVRIP / Xiongmai / ARP
+    var type = ""        // Camera / Printer / Switch-Router / PC / NAS — from fingerprinting
 
     val key: String
         get() = if (mac.isNotEmpty()) "M:" + mac.uppercase() else "I:$ip"
@@ -32,6 +33,7 @@ class Device {
         if (o.source.isNotEmpty() && (source.isEmpty() || !source.contains(o.source)))
             source = if (source.isEmpty()) o.source else "$source+${o.source}"
         if (brand.isEmpty()) brand = o.brand
+        if (type.isEmpty()) type = o.type
     }
 
     fun fillVendorFromMac() {

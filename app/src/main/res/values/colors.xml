@@ -1,0 +1,6 @@
+<resources>
+    <color name="primary">#1565C0</color>
+    <color name="primary_dark">#0D47A1</color>
+    <color name="offsubnet">#FFF9D6</color>
+    <color name="inactive">#FFE0E0</color>
+</resources>

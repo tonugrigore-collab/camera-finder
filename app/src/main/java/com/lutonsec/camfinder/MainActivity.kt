@@ -181,20 +181,38 @@ class MainActivity : AppCompatActivity() {
 
     // ---- actions ----
     private fun showActions(d: Device) {
-        val items = arrayOf("Open in browser", "Change IP / settings", "Reset help", "Factory reset", "Reboot", "Copy IP")
+        val items = arrayOf("Live view", "Open in browser", "Change IP / settings", "Reset help", "Factory reset", "Reboot", "Copy IP")
         AlertDialog.Builder(this)
             .setTitle("${d.ip}   ${if (d.brand.isNotEmpty()) d.brand else d.vendor}")
             .setItems(items) { _, which ->
                 when (which) {
-                    0 -> openInBrowser(d)
-                    1 -> changeIp(d)
-                    2 -> resetHelp(d)
-                    3 -> factoryReset(d)
-                    4 -> reboot(d)
-                    5 -> { (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                    0 -> liveView(d)
+                    1 -> openInBrowser(d)
+                    2 -> changeIp(d)
+                    3 -> resetHelp(d)
+                    4 -> factoryReset(d)
+                    5 -> reboot(d)
+                    6 -> { (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
                         .setPrimaryClip(android.content.ClipData.newPlainText("ip", d.ip)); setStatus("Copied ${d.ip}") }
                 }
             }.show()
+    }
+
+    private fun liveView(d: Device) {
+        if (!isReachable(d)) {       // off-subnet: borrow a temp IP (root) so the player can reach it, like Open in browser
+            val sel = selectedNic()
+            val prefix = if (d.mask.isNotEmpty()) NetUtil.prefixFromMask(d.mask) else 24
+            val temp = pickTemp(d.ip, prefix)
+            if (sel != null && Root.hasSu() && Root.addTempIp(sel.name, temp, prefix)) {
+                tempIps.add(Triple(sel.name, temp, prefix))
+                setStatus("Added temp IP $temp to reach ${d.ip}")
+            } else if (!Root.hasSu()) {
+                toast("Camera ${d.ip} is on a different range. Join its network, or set the tester's IP to ${temp}/$prefix. (Root is needed for an automatic temp IP.)")
+            }
+        }
+        val i = Intent(this, LiveActivity::class.java)
+        i.putExtra("ip", d.ip); i.putExtra("brand", d.brand); i.putExtra("user", u()); i.putExtra("pass", p())
+        startActivity(i)
     }
 
     private fun openInBrowser(d: Device) {
